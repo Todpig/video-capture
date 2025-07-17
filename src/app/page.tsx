@@ -1,103 +1,244 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useRef, useEffect } from "react";
+
+export default function MediaRecorderPage() {
+  const [permission, setPermission] = useState<boolean>(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [recordingStatus, setRecordingStatus] = useState<
+    "inactive" | "recording"
+  >("inactive");
+  const [recordedVideo, setRecordedVideo] = useState<string | null>(null);
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+  const [audioSource, setAudioSource] = useState<string>("");
+  const [videoSource, setVideoSource] = useState<string>("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const playbackRef = useRef<HTMLVideoElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
+  useEffect(() => {
+    const getDevices = async () => {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter((device) => device.kind === "videoinput");
+      const mics = devices.filter((device) => device.kind === "audioinput");
+      setCameraDevices(cameras);
+      setMicDevices(mics);
+      if (cameras.length > 0) setVideoSource(cameras[0].deviceId);
+      if (mics.length > 0) setAudioSource(mics[0].deviceId);
+    };
+    getDevices();
+  }, []);
+
+  const startCamera = async () => {
+    try {
+      const constraints: MediaStreamConstraints = {
+        audio: audioSource ? { deviceId: { exact: audioSource } } : true,
+        video: videoSource ? { deviceId: { exact: videoSource } } : true,
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setPermission(true);
+      setStream(stream);
+      if (videoRef.current) 
+        videoRef.current.srcObject = stream;
+    } catch (err) {
+      console.error(err);
+      alert("Failed to access media devices.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      setStream(null);
+      setPermission(false);
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    }
+  };
+
+  const startRecording = async () => {
+    if (!stream) return;
+    setRecordingStatus("recording");
+    setRecordedVideo(null);
+    let localChunks: Blob[] = [];
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+    mediaRecorderRef.current = mediaRecorder;
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        localChunks.push(event.data);
+      }
+    };
+    mediaRecorder.onstop = () => {
+      const videoBlob = new Blob(localChunks, { type: "video/webm" });
+      const videoUrl = URL.createObjectURL(videoBlob);
+      setRecordedVideo(videoUrl);
+    };
+    mediaRecorder.start(1000);
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && recordingStatus === "recording") {
+      setRecordingStatus("inactive");
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const handleDeviceChange = async () => {
+    if (stream) {
+      stopCamera();
+      await startCamera();
+    }
+  };
+
+  const downloadVideo = () => {
+    if (!recordedVideo) return;
+    const a = document.createElement("a");
+    a.href = recordedVideo;
+    a.download = "recording.webm";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="min-h-screen bg-gray-100 p-8">
+      <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-md overflow-hidden p-6">
+        <h1 className="text-2xl font-bold text-gray-800 mb-6">
+          Media Recorder
+        </h1>
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold mb-3">Device Settings</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Camera
+              </label>
+              <select
+                value={videoSource}
+                onChange={(e) => {
+                  setVideoSource(e.target.value);
+                  handleDeviceChange();
+                }}
+                className="w-full p-2 border border-gray-300 rounded-md"
+              >
+                {cameraDevices.map((device) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label ||
+                      `Camera ${cameraDevices.indexOf(device) + 1}`}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Microphone
+              </label>
+              <select
+                value={audioSource}
+                onChange={(e) => {
+                  setAudioSource(e.target.value);
+                  handleDeviceChange();
+                }}
+                className="w-full p-2 border border-gray-300 rounded-md"
+              >
+                {micDevices.map((device) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label ||
+                      `Microphone ${micDevices.indexOf(device) + 1}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold mb-3">Preview</h2>
+          <div className="relative bg-black rounded-lg overflow-hidden">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-auto max-h-96"
+            />
+            {!permission && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-70 text-white">
+                Camera preview will appear here
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-4 mb-6">
+          {!permission ? (
+            <button
+              onClick={startCamera}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            >
+              Start Camera
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={stopCamera}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition"
+              >
+                Stop Camera
+              </button>
+
+              {recordingStatus === "inactive" ? (
+                <button
+                  onClick={startRecording}
+                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+                >
+                  Start Recording
+                </button>
+              ) : (
+                <button
+                  onClick={stopRecording}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition"
+                >
+                  Stop Recording
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {recordedVideo && (
+          <div className="mt-6">
+            <h2 className="text-lg font-semibold mb-3">Recorded Video</h2>
+            <div className="bg-black rounded-lg overflow-hidden">
+              <video
+                ref={playbackRef}
+                src={recordedVideo}
+                controls
+                className="w-full h-auto max-h-96"
+              />
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={downloadVideo}
+                className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition"
+              >
+                Download Video
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 text-sm text-gray-600">
+          <p>Camera Status: {permission ? "Active" : "Inactive"}</p>
+          <p>
+            Recording Status:{" "}
+            {recordingStatus === "recording" ? "Recording..." : "Ready"}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
